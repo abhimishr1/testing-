@@ -84,21 +84,16 @@ index=your_index_name "'total':" "moreAvailable': False" earliest=-7d
 | table apiname total latest_api_time
 ===========================
 index=your_index sourcetype=your_sourcetype function=_invoke_api_call ("moreAvailable: False" OR "Sending to")
-| rex field=_raw "timestamp:\s+(?<ts_str>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)"
-| rex field=_raw "event:\s+API response data:\s*\{'total':\s*(?<total>\d+)"
-| rex field=_raw "event:\s+Sending to\s+https?://\S+/+(?<api>[^ ]+)"
-# split ts_str into base seconds and optional microseconds
-| rex field=ts_str "(?<ts_base>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<micros>\d+))?Z"
-# keep only up to 6 digits of micros (pad/trim if needed) and build _time
-| eval micros6 = if(isnull(micros), "0", substr(micros,0,6))
-| eval _time = strptime(ts_base, "%Y-%m-%dT%H:%M:%S") + (tonumber(micros6) / 1000000)
-# merge events that share the same exact timestamp string (response + sending)
-| stats latest(total) AS total latest(api) AS api latest(ts_str) AS timestamp latest(_time) AS _time BY ts_str
-# require both total and api to be present (safety)
+| rex field=_raw "timestamp:\s*(?<ts_str>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+| rex field=_raw "API response data:\s*\{'total':\s*(?<total>\d+)"
+| rex field=_raw "Sending to\s+https?://\S+/+(?<api>[^ ]+)"
+| eval _time = strptime(ts_str,"%Y-%m-%dT%H:%M:%S")
+| eval join_key = ts_str . ":" . source
+| stats latest(total) AS total latest(api) AS api latest(ts_str) AS timestamp BY join_key
 | where isnotnull(total) AND api!=""
-# now pick the most recent record per api
-| stats latest(total) AS total latest(timestamp) AS timestamp latest(_time) AS _time BY api
-| sort - _time
+| stats latest(total) AS total latest(timestamp) AS timestamp BY api
+| sort - timestamp
 | table api total timestamp
+
 
 
