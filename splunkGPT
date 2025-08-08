@@ -83,23 +83,22 @@ index=your_index_name "'total':" "moreAvailable': False" earliest=-7d
 | eval latest_api_time = strftime(latest_api_time, "%Y-%m-%d %H:%M:%S")
 | table apiname total latest_api_time
 ===========================
-index=your_index_name ("'total':" "moreAvailable': False" OR "function=invokeapi") earliest=-7d
-| eval is_total_event = if(match(_raw, "'total':") AND match(_raw, "moreAvailable': False"), 1, 0)
-| eval is_invokeapi_event = if(match(_raw, "function=invokeapi"), 1, 0)
-| rex field=_raw "'total':\s*(?<total>\d+)"
-| eval apiname_raw = if(is_invokeapi_event=1, mvindex(split(_raw, "/"), -1), null())
-| eval apiname_first = if(is_invokeapi_event=1, mvindex(split(apiname_raw, " "), 0), null())
-| eval apiname = if(is_invokeapi_event=1, trim(mvindex(split(apiname_first, "?"), 0)), null())
-| eval ts_str = coalesce(timestamp, tostring(_time))
-| eval ts_clean = replace(ts_str, "Z", "")
-| eval ts_real = if(match(ts_clean, "^\d{4}-\d{2}-\d{2}T"),
-    strptime(ts_clean, "%Y-%m-%dT%H:%M:%S.%6N"),
-    tonumber(_time))
-| eventstats latest(ts_real) as latest_api_time by source apiname
-| eventstats values(total) as total by source
-| where is_invokeapi_event=1 AND isnotnull(apiname) AND isnotnull(total)
-| eval latest_api_time = strftime(latest_api_time, "%Y-%m-%d")
-| stats values(total) as total values(latest_api_time) as latest_api_time by apiname
-| sort apiname
+index=your_index sourcetype=your_sourcetype function=_invoke_api_call ("moreAvailable: False" OR "Sending to")
+| rex field=_raw "timestamp:\s+(?<ts_str>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)"
+| rex field=_raw "event:\s+API response data:\s*\{'total':\s*(?<total>\d+)"
+| rex field=_raw "event:\s+Sending to\s+https?://\S+/+(?<api>[^ ]+)"
+# split ts_str into base seconds and optional microseconds
+| rex field=ts_str "(?<ts_base>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<micros>\d+))?Z"
+# keep only up to 6 digits of micros (pad/trim if needed) and build _time
+| eval micros6 = if(isnull(micros), "0", substr(micros,0,6))
+| eval _time = strptime(ts_base, "%Y-%m-%dT%H:%M:%S") + (tonumber(micros6) / 1000000)
+# merge events that share the same exact timestamp string (response + sending)
+| stats latest(total) AS total latest(api) AS api latest(ts_str) AS timestamp latest(_time) AS _time BY ts_str
+# require both total and api to be present (safety)
+| where isnotnull(total) AND api!=""
+# now pick the most recent record per api
+| stats latest(total) AS total latest(timestamp) AS timestamp latest(_time) AS _time BY api
+| sort - _time
+| table api total timestamp
 
 
