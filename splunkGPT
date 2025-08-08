@@ -59,4 +59,27 @@ index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
 | eval latest_time = strftime(latest_time, "%Y-%m-%d %H:%M:%S")
 | table apiname total latest_time
 
+-------------------------------
+index=your_index_name "'total':" "moreAvailable': False" earliest=-7d
+| rex field=source "[/\\](?<source_name>[^/\\]+)$"
+| rex "'total':\s*(?<total>\d+)"
+| stats latest(_time) as latest_time values(total) as total by source_name
+| sort - latest_time
+| head 1
+| join type=inner source_name [
+    search index=your_index_name "function=invokeapi" earliest=-7d
+    | rex field=source "[/\\](?<source_name>[^/\\]+)$"
+    | eval apiname_raw = mvindex(split(_raw, "/"), -1)
+    | eval apiname_first = mvindex(split(apiname_raw, " "), 0)
+    | eval apiname = trim(mvindex(split(apiname_first, "?"), 0))
+    | eval ts_str = coalesce(timestamp, tostring(_time))
+    | eval ts_clean = replace(ts_str, "Z", "")
+    | eval ts_real = if(match(ts_clean, "^\d{4}-\d{2}-\d{2}T"),
+        strptime(ts_clean, "%Y-%m-%dT%H:%M:%S.%6N"),
+        tonumber(_time))
+    | table source_name apiname ts_real
+]
+| stats latest(ts_real) as latest_api_time by apiname total
+| eval latest_api_time = strftime(latest_api_time, "%Y-%m-%d %H:%M:%S")
+| table apiname total latest_api_time
 
