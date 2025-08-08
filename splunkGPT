@@ -1,0 +1,62 @@
+index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
+| eval apiname_raw = if(event=="invokeapi", mvindex(split(_raw, "/"), -1), null())
+| eval apiname_first = if(isnotnull(apiname_raw), mvindex(split(apiname_raw, " "), 0), null())
+| eval apiname_no_q = if(isnotnull(apiname_first), mvindex(split(apiname_first, "?"), 0), null())
+| eval apiname = trim(apiname_no_q)
+| table event apiname logStream timestamp _raw
+| sort - timestamp
+| head 50
+
+index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
+| rex field=_raw "total':\s*(?<total>\d+)"
+| rex field=_raw "moreAvailable':\s*(?<moreAvailable>\w+)"
+| eval moreAvailable = lower(moreAvailable)
+| table event total moreAvailable _raw logStream timestamp apiname
+| sort - timestamp
+| head 50
+
+index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
+| eval ts_str = coalesce(timestamp, tostring(_time))
+| eval ts_clean = replace(ts_str, "Z", "")
+| eval ts_real = if(match(ts_clean, "^\d{4}-\d{2}-\d{2}T"), strptime(ts_clean, "%Y-%m-%dT%H:%M:%S.%6N"), tonumber(_time))
+| table event ts_str ts_real _time timestamp logStream apiname total moreAvailable
+| sort - ts_real
+| head 50
+
+index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
+| eval apiname_raw = if(event=="invokeapi", mvindex(split(_raw, "/"), -1), null())
+| eval apiname_first = if(isnotnull(apiname_raw), mvindex(split(apiname_raw, " "),0), null())
+| eval apiname = trim(mvindex(split(apiname_first, "?"),0))
+| rex field=_raw "total':\s*(?<total>\d+)"
+| rex field=_raw "moreAvailable':\s*(?<moreAvailable>\w+)"
+| eval moreAvailable = lower(moreAvailable)
+| eval ts_str = coalesce(timestamp, tostring(_time))
+| eval ts_clean = replace(ts_str, "Z", "")
+| eval ts_real = if(match(ts_clean, "^\d{4}-\d{2}-\d{2}T"), strptime(ts_clean, "%Y-%m-%dT%H:%M:%S.%6N"), tonumber(_time))
+
+| stats latest(ts_real) as latest_time latest(eval(if(moreAvailable=="false", total, null()))) as total by logStream apiname
+| sort - latest_time
+| table logStream apiname total latest_time
+
+
+index=your_index_name ("API response" OR event="invokeapi") earliest=-7d
+| eval apiname_raw = if(event=="invokeapi", mvindex(split(_raw, "/"), -1), null())
+| eval apiname_first = if(isnotnull(apiname_raw), mvindex(split(apiname_raw, " "),0), null())
+| eval apiname = trim(mvindex(split(apiname_first, "?"),0))
+| rex field=_raw "total':\s*(?<total>\d+)"
+| rex field=_raw "moreAvailable':\s*(?<moreAvailable>\w+)"
+| eval moreAvailable = lower(moreAvailable)
+| eval ts_str = coalesce(timestamp, tostring(_time))
+| eval ts_clean = replace(ts_str, "Z", "")
+| eval ts_real = if(match(ts_clean, "^\d{4}-\d{2}-\d{2}T"), strptime(ts_clean, "%Y-%m-%dT%H:%M:%S.%6N"), tonumber(_time))
+
+| stats latest(ts_real) as latest_time latest(eval(if(moreAvailable=="false", total, null()))) as total by logStream apiname
+| eventstats max(latest_time) as stream_max by logStream
+| eventstats max(stream_max) as global_max
+| where stream_max==global_max
+| where isnotnull(apiname) AND isnotnull(total)
+| sort - latest_time
+| eval latest_time = strftime(latest_time, "%Y-%m-%d %H:%M:%S")
+| table apiname total latest_time
+
+
